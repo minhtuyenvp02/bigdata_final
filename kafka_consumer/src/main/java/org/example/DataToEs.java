@@ -37,13 +37,15 @@ public class DataToEs {
         // Setup Spark config
         SparkConf conf = new SparkConf();
         conf.setAppName("DataToEs");
-//        conf.setMaster("spark://spark-master:7077");
-        conf.setMaster("local[*]");
+        conf.setMaster("spark://spark-master:7077");
+//        conf.setMaster("local[*]");
         conf.set("es.nodes", "elasticsearch")
                 .set("es.port", "9200")
                 .set("es.index.auto.create", "yes")
+                .set("es.nodes.wan.only", "true")
                 .set("spark.sql.analyzer.failAmbiguousSelfJoin", "false")
                 .set("es.index.read.missing.as.empty", "yes");
+
         //Create Spark sesion
         SparkSession session = SparkSession.builder()
                 .config(conf)
@@ -57,7 +59,8 @@ public class DataToEs {
         // read Stream message from kafka
         Dataset<Row> df = session.readStream()
                 .format("kafka")
-                .option("kafka.bootstrap.servers", "localhost:8097, localhost:8098, localhost:8099")
+//                .option("kafka.bootstrap.servers", "localhost:8097, localhost:8098, localhost:8099")
+                .option("kafka.bootstrap.servers", "kafka11:29092, kafka12:29092, kafka13:29092")
                 .option("subscribe", "stockStreaming")
                 .option("startingOffsets", "earliest")
                 .option("includeHeaders", "true")
@@ -86,6 +89,7 @@ public class DataToEs {
                 .drop("fSVolume")
                 .drop("fSValue")
                 .drop("mc");
+
         // read static stream from CSV file
         StockCfSchema stockCfSchema = new StockCfSchema();
         session.sparkContext().setLogLevel("WARN");
@@ -95,7 +99,8 @@ public class DataToEs {
                 .option("multiline", true)
                 .option("sep", ",")
                 .schema(stockCfSchema.getStockCfSchema())
-                .load("kafka_consumer/src/main/resources");
+//                .load("/kafka_consumer/src/main/resources");
+                .load("data");
         // Join stream-static
         //append
         stocks_df=stocks_df.join(stockData, stocks_df.col("Sym").equalTo(stockData.col("Symbol")))
@@ -115,7 +120,7 @@ public class DataToEs {
                 .withColumnRenamed("lot", "Tổng khối lượng giao dịch")
                 .withColumnRenamed("ot", "Tỷ lệ biến động")
                 .withColumn("UpdatedDate", current_timestamp())
-                .withColumn("PE", expr("CASE WHEN `EPS` = 'inf' OR `EPS` = '0' THEN 0 ELSE `Giá tham chiếu` / CAST(`EPS` AS Double) END"))
+                .withColumn("PE", expr("CASE WHEN `EPS` = 'inf' OR `EPS` = 'nan' OR `EPS` = '0' THEN 0 ELSE `Giá tham chiếu` / CAST(`EPS` AS Double) END"))
                 .drop("Symbol")
                 .drop("CWListedShare")
         ;
@@ -128,41 +133,14 @@ public class DataToEs {
         //select + filter + orderBy
 //        Dataset<Row> filterVonHoa = dfForCompute.select(col("Mã cổ phiếu"), col("Tên Cty"), col("CenterName"), col("Vốn hoá thị trường")).filter(expr("`Vốn hoá thị trường` > 3000.0")).orderBy(col("Vốn hoá thị trường").desc());// append
 //        Dataset<Row> prepareData = stocks_df.select("Giá khớp lệnh", "Giá tham chiếu", "Giá ")
-//        VectorAssembler assembler = new VectorAssembler();
-//        assembler = assembler.setInputCols(stocks_df.drop("uuid").columns())
-//                .setOutputCol("fearture");
-//        Dataset<Row> traningData = assembler.transform(stocks_df)
-//        KMeans kMeans = new KMeans();
-//        ParamGridBuilder paramGridBuilder = new ParamGridBuilder()
-//                .addGrid(kMeans.k(), new int[]{2, 4, 6, 8, 10})
-//                .addGrid(kMeans.maxIter(), new int[]{10, 20, 30});
-//        ParamMap[] paramGrid = paramGridBuilder.build();
-//
-//        // Khởi tạo đánh giá mô hình
-//        ClusteringEvaluator evaluator = new ClusteringEvaluator();
-//
-//        // Khởi tạo CrossValidator
-//        CrossValidator crossValidator = new CrossValidator()
-//                .setEstimator(kMeans)
-//                .setEstimatorParamMaps(paramGrid)
-//                .setEvaluator(evaluator)
-//                .setNumFolds(3);
-//        CrossValidatorModel cvModel = crossValidator.fit(s);
-//
-//        // Lấy mô hình tốt nhất
-//        KMeansModel bestModel = (KMeansModel) cvModel.bestModel();
-//
-//        // Lấy số cụm tối ưu nhất
-//        int bestK = bestModel.getK();
-
-        StreamingQuery query = stockData.writeStream()
-                .format("console")
+        StreamingQuery query = stocks_df.writeStream()
+//                .format("console")
                 .outputMode("append")
-//                .queryName("writing_to_es")
-//                .format("org.elasticsearch.spark.sql")
-//                .option("checkpointLocation", "/tmp/")
-//                .option("es.resource", "stock")
-//                .option("es.nodes", "localhost")
+                .queryName("writing_to_es")
+                .format("org.elasticsearch.spark.sql")
+                .option("checkpointLocation", "/tmp/")
+                .option("es.resource", "stock")
+                .option("es.nodes", "elasticsearch")
                 .start();
         query.awaitTermination();
     }
