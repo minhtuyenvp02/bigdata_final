@@ -1,0 +1,168 @@
+version: '3'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.2.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+  kafka11:
+    image: confluentinc/cp-kafka:7.2.1
+    container_name: kafka11
+    ports:
+      - 8097:9092
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka11:29092,OUTSIDE://localhost:8097
+      KAFKA_LISTENERS: INSIDE://:29092,OUTSIDE://:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_CREATE_TOPICS: "stockStreaming"
+  kafka12:
+    image: confluentinc/cp-kafka:7.2.1
+    container_name: kafka12
+    ports:
+      - 8098:9092
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka12:29092,OUTSIDE://localhost:8098
+      KAFKA_LISTENERS: INSIDE://:29092,OUTSIDE://:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+  kafka13:
+    image: confluentinc/cp-kafka:7.2.1
+    container_name: kafka13
+    ports:
+      - 8099:9092
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka13:29092,OUTSIDE://localhost:8099
+      KAFKA_LISTENERS: INSIDE://:29092,OUTSIDE://:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.15.1
+    container_name: elasticsearch
+    volumes:
+      - ../kafka_consumer/storage/esdata:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+      - 9300:9300
+    environment:
+      - xpack.security.enabled=false
+      - "discovery.type=single-node"
+    #    networks:
+    #      - es-net
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.15.1
+    container_name: kibana
+    ports:
+      - 5601:5601
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+  cassandra-1:
+    image: cassandra:latest
+    container_name: cassandra-1
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=my-cassandra-cluster
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_DC=my-datacenter-1
+  cassandra-2:
+    image: cassandra:latest
+    container_name: cassandra-2
+    ports:
+      - "9043:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=my-cassandra-cluster
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_DC=my-datacenter-1
+      - CASSANDRA_SEEDS=cassandra-1
+  spark-master:
+      image: minhtuyenvp02/spark-cluster-3.3.2
+      container_name: spark-master
+  #    depends_on:
+  #      - cassandra-3
+      ports:
+        - "9090:8080"
+        - "7077:7077"
+      volumes:
+        - ./kafka_consumer/target:/opt/spark-apps
+        - ./kafka_consumer/conf/master:/opt/spark/conf
+      environment:
+        - SPARK_LOCAL_IP=spark-master
+        - SPARK_WORKLOAD=master
+
+  spark-worker-1:
+    image: minhtuyenvp02/spark-cluster-3.3.2
+    ports:
+      - "29090-29999:8080"
+#      - "9099:8080"
+      - "7777-7799:7000"
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_DRIVER_MEMORY=1G
+      - SPARK_EXECUTOR_MEMORY=1G
+      - SPARK_WORKLOAD=worker
+      - SPARK_LOCAL_IP=spark-worker-1
+    volumes:
+      - ./kafka_consumer/target:/opt/spark-apps
+      - ./kafka_consumer/conf/worker:/conf
+  spark-worker-2:
+    image: minhtuyenvp02/spark-cluster-3.3.2
+    ports:
+      - "9092:8080"
+      - "7778:7000"
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_DRIVER_MEMORY=1G
+      - SPARK_EXECUTOR_MEMORY=1G
+      - SPARK_WORKLOAD=worker
+      - SPARK_LOCAL_IP=spark-worker-2
+    volumes:
+      - ./kafka_consumer/target:/opt/spark-apps
+      - ./kafka_consumer/conf/worker:/conf
+  spark-history-server:
+    image: rangareddy1988/spark-history-server:3.4.1
+    container_name: spark-history-server
+    environment:
+      - SPARK_HISTORY_UI_PORT=18080
+      - SPARK_DAEMON_MEMORY=4g
+      - SPARK_HISTORY_RETAINEDAPPLICATIONS=200
+      - SPARK_HISTORY_UI_MAXAPPLICATIONS=500
+    ports:
+      - 18080:18080
+      - 4444:4040
+    volumes:
+      - /tmp/spark/spark-events:/tmp/spark-events
+      - /tmp/spark/spark-history-server-logs:/var/log/spark
+
+#    image: trieu81200111/kafka-producer
+#    container_name: kafka-producer
+#    depends_on:
+#      - kafka11
+#      - kafka12
+#      - kafka13
+#    environment:
+#      KAFKA_11_HOST: kafka11
+#      KAFKA_12_HOST: kafka12
+#      KAFKA_13_HOST: kafka13
